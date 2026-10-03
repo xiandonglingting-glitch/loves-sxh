@@ -33157,13 +33157,10 @@ const addMessage = (message) => {
         container.appendChild(newMsgFragment);
     }
 
-    // 只有当用户已经在底部附近时才自动滚动到新消息，避免打断用户浏览历史消息
-    const _addMsgNearBottom = (container.scrollHeight - container.scrollTop - container.clientHeight) < 80;
-    if (_addMsgNearBottom) {
-        requestAnimationFrame(() => {
-            container.scrollTop = container.scrollHeight;
-        });
-    }
+    // 新消息（本人或对方）加入到对话框后自动滚到底部，让用户无需手动下拉即可看到最新消息
+    requestAnimationFrame(() => {
+        container.scrollTop = container.scrollHeight;
+    });
 
     throttledSaveData();
 
