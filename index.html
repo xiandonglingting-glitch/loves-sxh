@@ -60325,7 +60325,7 @@ if (sessionId === currentSessionId) {
         // 这会覆盖全局版本设置的事件监听器
         if (typeof initCoreListeners === 'function') initCoreListeners();
 
-function _applyCollapseState(on) {
+window._applyCollapseState = function(on) {
     document.body.classList.toggle('bottom-collapse-mode', on);
     const csToggle = document.getElementById('bottom-collapse-cs-toggle');
     if (csToggle) csToggle.classList.toggle('active', on);
