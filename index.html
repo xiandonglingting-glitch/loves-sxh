@@ -24550,6 +24550,55 @@ html[data-theme="dark"] .map-loc-detail-row {
     </style>
 </head>
 <body>
+<script>
+// 底部栏收纳开关 - 提前定义，确保HTML onclick可用
+function toggleBottomCollapse() {
+    const isOn = !document.body.classList.contains('bottom-collapse-mode');
+    document.body.classList.toggle('bottom-collapse-mode', isOn);
+    const csToggle = document.getElementById('bottom-collapse-cs-toggle');
+    if (csToggle) csToggle.classList.toggle('active', isOn);
+    if (typeof window.settings !== 'undefined') window.settings.bottomCollapseMode = isOn;
+    if (!isOn) {
+        const panel = document.getElementById('collapsed-extras-panel');
+        if (panel) panel.style.display = 'none';
+        const expandBtn = document.getElementById('collapse-expand-btn');
+        if (expandBtn) expandBtn.classList.remove('open');
+    }
+    if (typeof throttledSaveData === 'function') throttledSaveData();
+    if (typeof showNotification === 'function')
+        showNotification(isOn ? '底部栏已收纳 — 点击 ⌃ 展开更多' : '已退出收纳模式', 'success', 2000);
+}
+window.toggleBottomCollapse = toggleBottomCollapse;
+
+// 顶部栏常驻清晰开关
+function toggleHeaderOpacity() {
+    // 直接调用原有逻辑，避免重复切换
+    if (typeof window._toggleHeaderOpacity === 'function') {
+        window._toggleHeaderOpacity();
+    }
+}
+window.toggleHeaderOpacity = toggleHeaderOpacity;
+
+// 图片选择后自动发送 - 提前绑定，确保iOS相册选择器生效后立即发送
+document.addEventListener('DOMContentLoaded', function() {
+    var imgInput = document.getElementById('image-input');
+    if (imgInput) {
+        imgInput.addEventListener('change', function() {
+            if (imgInput.files && imgInput.files[0]) {
+                // 检查是否批量模式
+                if (typeof window.getIsBatchMode === 'function' && window.getIsBatchMode()) {
+                    if (typeof showNotification === 'function') showNotification('批量模式不支持图片', 'warning');
+                    imgInput.value = '';
+                    return;
+                }
+                setTimeout(function() {
+                    if (typeof window.sendMessage === 'function') window.sendMessage();
+                }, 150);
+            }
+        });
+    }
+});
+</script>
 <div id="splash-declaration">
     <div class="splash-bg-stars" id="splash-stars"></div>
     <div class="splash-glow-1"></div>
@@ -27803,12 +27852,12 @@ html[data-theme="dark"] .map-loc-detail-row {
                             <span class="setting-pill-label">沉浸式模式 <span style="font-size:11px;color:var(--text-secondary);font-weight:400;">隐藏顶部栏，专注聊天</span></span>
                             <div class="setting-pill-switch"><div class="setting-pill-knob"></div></div>
                         </div>
-                        <div class="setting-pill-row" id="bottom-collapse-cs-toggle" onclick="window._toggleBottomCollapse && window._toggleBottomCollapse()" style="border-top:1px solid var(--border-color);">
+                        <div class="setting-pill-row" id="bottom-collapse-cs-toggle" onclick="toggleBottomCollapse()" style="border-top:1px solid var(--border-color);">
                             <span class="setting-pill-icon"><i class="fas fa-compress-alt"></i></span>
                             <span class="setting-pill-label">底部栏收纳 <span style="font-size:11px;color:var(--text-secondary);font-weight:400;" id="bottom-collapse-cs-desc">收起次要按钮，保持输入区整洁</span></span>
                             <div class="setting-pill-switch" id="bottom-collapse-cs-switch"><div class="setting-pill-knob" id="bottom-collapse-cs-knob"></div></div>
                         </div>
-                        <div class="setting-pill-row" id="header-opacity-toggle" onclick="window._toggleHeaderOpacity && window._toggleHeaderOpacity()" style="border-top:1px solid var(--border-color);">
+                        <div class="setting-pill-row" id="header-opacity-toggle" onclick="toggleHeaderOpacity()" style="border-top:1px solid var(--border-color);">
                             <span class="setting-pill-icon"><i class="fas fa-eye"></i></span>
                             <span class="setting-pill-label">顶部栏常驻清晰 <span style="font-size:11px;color:var(--text-secondary);font-weight:400;">关闭后顶部栏悬停才清晰</span></span>
                             <div class="setting-pill-switch" id="header-opacity-switch"><div class="setting-pill-knob" id="header-opacity-knob"></div></div>
@@ -37203,6 +37252,10 @@ document.addEventListener('DOMContentLoaded', function() {
             applyTheme(preset.dataset.theme);
         }
     }, true); // 使用捕获阶段
+
+    // 暴露 sendMessage 和 isBatchMode 到全局，供外部事件监听器调用
+    window.sendMessage = sendMessage;
+    window.getIsBatchMode = function() { return isBatchMode; };
 
 })();
 
@@ -55598,17 +55651,6 @@ function showVoiceTab() {
             });
 
 
-            DOMElements.imageInput.addEventListener('change', () => {
-                if (DOMElements.imageInput.files[0]) {
-                    if (isBatchMode) {
-                        showNotification('批量模式不支持图片', 'warning');
-                        DOMElements.imageInput.value = '';
-                    } else {
-                        sendMessage();
-                    }
-                }
-            });
-
             DOMElements.continueBtn.addEventListener('click', simulateReply);
             DOMElements.batchBtn.addEventListener('click', toggleBatchMode);
         }
@@ -59842,16 +59884,7 @@ if (sessionId === currentSessionId) {
             });
 
 
-            DOMElements.imageInput.addEventListener('change', () => {
-                if (DOMElements.imageInput.files[0]) {
-                    if (isBatchMode) {
-                        showNotification('批量模式不支持图片', 'warning');
-                        DOMElements.imageInput.value = '';
-                    } else {
-                        sendMessage();
-                    }
-                }
-            });
+            // imageInput change 事件已在全局作用域绑定自动发送逻辑，此处不再重复
 
             DOMElements.continueBtn.addEventListener('click', simulateReply);
             DOMElements.batchBtn.addEventListener('click', toggleBatchMode);
@@ -59876,15 +59909,6 @@ window._applyCollapseState = function(on) {
         if (expandBtn) expandBtn.classList.remove('open');
     }
 }
-
-window._toggleBottomCollapse = function() {
-    const isOn = !document.body.classList.contains('bottom-collapse-mode');
-    if (typeof settings !== 'undefined') settings.bottomCollapseMode = isOn;
-    window._applyCollapseState(isOn);
-    if (typeof throttledSaveData === 'function') throttledSaveData();
-    if (typeof showNotification === 'function')
-        showNotification(isOn ? '底部栏已收纳 — 点击 ⌃ 展开更多' : '已退出收纳模式', 'success', 2000);
-};
 
 window.toggleCollapsedExtras = function() {
     const panel = document.getElementById('collapsed-extras-panel');
