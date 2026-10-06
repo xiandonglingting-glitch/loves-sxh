@@ -2225,7 +2225,7 @@ body.always-show-avatar .message-avatar.hidden {
 }
 
 .message {
-    padding: 8.4px 18px;
+    padding: 6.4px 18px;
     border-radius: var(--radius);
     word-wrap: break-word;
     line-height: var(--message-line-height);
@@ -15483,7 +15483,7 @@ rgba(255, 255, 255, 0.45) 100%
 
 .standalone-time .time-display {
     font-size: 36px;
-    font-weight: 600;
+    font-weight: var(--message-font-weight, 600);
     color: var(--message-text-color, #3a3a3a);
     letter-spacing: 2px;
     line-height: 1;
@@ -15492,6 +15492,7 @@ rgba(255, 255, 255, 0.45) 100%
 
 .standalone-time .date-display {
     font-size: 13px;
+    font-weight: var(--message-font-weight, 400);
     color: var(--message-text-color, #8a8a8a);
     margin-top: 4px;
     letter-spacing: 1px;
@@ -19108,6 +19109,33 @@ body.dark-mode .home-notification-app {
   margin: 0 3px;
 }
 
+.moments-container .comment-item .comment-delete-btn {
+  display: none;
+  float: right;
+  color: #ff6b6b;
+  font-size: 11px;
+  padding: 2px 6px;
+  margin-left: 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.moments-container .comment-item:hover .comment-delete-btn,
+.moments-container .comment-item:active .comment-delete-btn {
+  display: inline;
+}
+
+.moments-container .comment-item .comment-delete-btn:hover {
+  opacity: 1;
+  background: rgba(255, 107, 107, 0.1);
+}
+
+.moments-container .comment-item .comment-delete-btn:active {
+  background: rgba(255, 107, 107, 0.2);
+}
+
 /* ========== Notification Card (inside card) ========== */
 .moments-container .moment-notification {
   text-align: center;
@@ -21867,6 +21895,14 @@ body.dark-mode .home-notification-app {
 
 .moments-container.dark-mode .comment-item .reply-arrow {
   color: #666;
+}
+
+.moments-container.dark-mode .comment-item .comment-delete-btn {
+  color: #ff8a8a;
+}
+
+.moments-container.dark-mode .comment-item .comment-delete-btn:hover {
+  background: rgba(255, 138, 138, 0.15);
 }
 
 /* 搜索面板 */
@@ -29403,8 +29439,25 @@ function deduplicateContentArray(arr, baseSystemArray = []) {
             localforage.config({
                 driver: [localforage.INDEXEDDB, localforage.WEBSQL, localforage.LOCALSTORAGE],
                 name: 'ChatApp_V3', version: 1.0, storeName: 'chat_data',
-                description: 'Storage for Chat App V3'
+                description: 'Storage for Chat App V3',
+                // 扩大 WebSQL 兜底数据库配额（IndexedDB 本身无大小上限，容量由浏览器按磁盘自动分配）
+                size: 512 * 1024 * 1024
             });
+            // 申请持久化存储：让浏览器把本应用数据视为重要数据，降低被自动清理风险，
+            // 并在磁盘允许时分配最大配额，以容纳原图等大体积存档。
+            if (typeof navigator.storage !== 'undefined' && typeof navigator.storage.persist === 'function') {
+                try { navigator.storage.persist().catch(function(){}); } catch(e) {}
+            }
+            // 记录当前可用配额，便于排查容量问题
+            if (typeof navigator.storage !== 'undefined' && typeof navigator.storage.estimate === 'function') {
+                try {
+                    navigator.storage.estimate().then(function(info) {
+                        if (info && info.quota) {
+                            console.log('[storage] 可用存储配额约 ' + (info.quota / 1048576).toFixed(0) + 'MB');
+                        }
+                    }).catch(function(){});
+                } catch(e) {}
+            }
         } else {
             console.warn('[storage] localforage 未加载，IndexedDB 能力不可用，将退回 localStorage/内存兜底');
         }
@@ -29822,6 +29875,19 @@ async function importAllData(file) {
                 label: 'TA的手机',
                 indexedDBNeedles: [],
                 localStorageNeedles: ['ta_phone_collections']
+            },
+            {
+                id: 'home',
+                label: '主页（背景 / 图标 / 外观）',
+                indexedDBNeedles: ['home_page_bg', 'home_card_bg', 'home_app_icons', 'home_page_bg_custom', 'home_card_bg_custom', 'home_page_bg_presets', 'home_card_bg_presets'],
+                localStorageNeedles: ['home_page_bg', 'home_card_bg', 'home_app_icons', 'home_icon_color', 'home_icon_color_name', 'home_hero_subtitle', 'home_theme', 'home_theme_custom', 'home_app_order', 'home_session_bind', 'home_avatar_sync', 'home_bg_sync', 'home_page_bg_custom', 'home_card_bg_custom', 'home_avatar_me', 'profile_me'],
+                localStoragePrefixes: ['home_profile_']
+            },
+            {
+                id: 'call',
+                label: '视频通话（背景 / 设置）',
+                indexedDBNeedles: ['callBgImageData'],
+                localStorageNeedles: ['callFeatureEnabled', 'callWindowPos', 'callWindowSize', 'callPillPos']
             }
         ];
 
@@ -33345,9 +33411,6 @@ const addMessage = (message) => {
             DOMElements.messageInput.style.height = '36px';
             DOMElements.messageInput.style.overflowX = 'auto';
             DOMElements.messageInput.style.overflowY = 'hidden';
-            if (imageFile && imageFile.size > MAX_IMAGE_SIZE) {
-                showNotification('图片大小不能超过5MB', 'error'); DOMElements.imageInput.value = ''; return;
-            }
 
             const createMessage = (imgSrc = null) => {
                 const messageData = {
@@ -33450,8 +33513,11 @@ if (!isBatchMode && type === 'normal') {
 };
 
             if (imageFile) {
-                showNotification('正在优化图片...', 'info', 1500);
-                optimizeImage(imageFile).then(createMessage).catch(() => showNotification('图片处理失败', 'error'));
+                // 相册原图画质发送：直接读取原始文件，不压缩、不限大小
+                const _imgReader = new FileReader();
+                _imgReader.onload = ev => createMessage(ev.target.result);
+                _imgReader.onerror = () => showNotification('图片处理失败', 'error');
+                _imgReader.readAsDataURL(imageFile);
             } else {
                 createMessage();
             }
@@ -33523,9 +33589,13 @@ if (!isBatchMode && type === 'normal') {
                 batchImgInput.addEventListener('change', async (e) => {
                     const file = e.target.files[0];
                     if (!file) return;
-                    if (file.size > MAX_IMAGE_SIZE) { showNotification('图片超过5MB限制', 'warning'); return; }
                     try {
-                        const base64 = await optimizeImage(file, 600, 0.8);
+                        const base64 = await new Promise((res, rej) => {
+                            const r = new FileReader();
+                            r.onload = ev => res(ev.target.result);
+                            r.onerror = rej;
+                            r.readAsDataURL(file);
+                        });
                         addToBatch(base64);
                     } catch(err) { showNotification('图片处理失败', 'error'); }
                     e.target.value = '';
@@ -39363,7 +39433,7 @@ window.generateRandomEnvelopeLetter = generateRandomEnvelopeLetter;
 
         var quickMsgs = isFestival
             ? festival.messages
-            : ['恭喜发财', '新年快乐', '大吉大利', '好运连连', '辛苦了~', '买杯奶茶'];
+            : ['恭喜发财', '新年快乐', '大吉大利', '好运连连', '辛苦了~', '买杯奶茶', '好好吃饭', '天天开心', '不要生气了好不好', '生日快乐', '我爱你'];
 
         var defaultMsg = isFestival ? festival.messages[0] : '';
 
@@ -55626,19 +55696,19 @@ function showVoiceTab() {
                 fileInput.addEventListener('change', function(e) {
                     const file = e.target.files[0];
                     if (file) {
-                        if (file.size > MAX_IMAGE_SIZE) {
-                            showNotification('图片大小不能超过5MB', 'error');
-                            return;
-                        }
-                        showNotification('正在优化图片...', 'info', 1500);
-                        optimizeImage(file).then(optimizedData => {
-                            currentImageData = optimizedData;
+                        const _r = new FileReader();
+                        _r.onload = ev => {
+                            currentImageData = ev.target.result;
                             previewImg.src = currentImageData;
                             previewDiv.style.display = 'block';
                             sendBtn.disabled = false;
-                        }).catch(() => {
-                            showNotification('图片处理失败', 'error');
-                        });
+                            // 选择文件后自动发送
+                            setTimeout(() => {
+                                sendBtn.click();
+                            }, 300);
+                        };
+                        _r.onerror = () => showNotification('图片处理失败', 'error');
+                        _r.readAsDataURL(file);
                     }
                 });
 
@@ -55660,6 +55730,10 @@ function showVoiceTab() {
 
                                     previewImg.src = url;
                                     showNotification('图片URL有效', 'success', 1000);
+                                    // URL有效后自动发送
+                                    setTimeout(() => {
+                                        sendBtn.click();
+                                    }, 500);
                                 };
                                 img.onerror = function() {
                                     showNotification('图片URL无效或无法访问', 'error');
@@ -58846,7 +58920,7 @@ if (_chatSettingsEl) _chatSettingsEl.addEventListener('click', () => {
                     document.documentElement.style.setProperty('--avatar-custom-offset', offset + 'px');
                     const sl = document.getElementById('avatar-custom-offset-slider');
                     const vl = document.getElementById('avatar-custom-offset-value');
-                    if (sl) sl.value = offset;
+                    if (sl) sl.value = Math.round(offset * 2);
                     if (vl) vl.textContent = offset + 'px';
                     const previewPartner = document.getElementById('preview-partner-avatar');
                     if (previewPartner) previewPartner.style.marginTop = offset + 'px';
@@ -58895,10 +58969,15 @@ if (_chatSettingsEl) _chatSettingsEl.addEventListener('click', () => {
             if (avatarSizeSlider) {
                 avatarSizeSlider.addEventListener('input', (e) => {
                     settings.inChatAvatarSize = parseInt(e.target.value, 10);
-                    updateAvatarSettingsUI();
-                    renderMessages(true); 
+                    // 拖动中只做轻量即时更新，避免每次全量重绘导致卡顿
+                    document.documentElement.style.setProperty('--in-chat-avatar-size', settings.inChatAvatarSize + 'px');
+                    if (avatarSizeValue) avatarSizeValue.textContent = settings.inChatAvatarSize + 'px';
                 });
-                avatarSizeSlider.addEventListener('change', throttledSaveData);
+                avatarSizeSlider.addEventListener('change', () => {
+                    updateAvatarSettingsUI();
+                    renderMessages(true);
+                    throttledSaveData();
+                });
             }
 
             ['avatar-pos-top-2','avatar-pos-center-2','avatar-pos-bottom-2','avatar-pos-custom-2'].forEach(btnId => {
@@ -58916,10 +58995,11 @@ if (_chatSettingsEl) _chatSettingsEl.addEventListener('click', () => {
             const customOffsetSlider = document.getElementById('avatar-custom-offset-slider');
             const customOffsetValue = document.getElementById('avatar-custom-offset-value');
             if (customOffsetSlider) {
-                customOffsetSlider.value = settings.inChatAvatarCustomOffset || 0;
+                customOffsetSlider.value = Math.round((settings.inChatAvatarCustomOffset || 0) * 2);
                 if (customOffsetValue) customOffsetValue.textContent = (settings.inChatAvatarCustomOffset || 0) + 'px';
                 customOffsetSlider.addEventListener('input', () => {
-                    const val = parseInt(customOffsetSlider.value, 10);
+                    const _raw = parseInt(customOffsetSlider.value, 10);
+                    const val = Math.round(_raw * 0.5);
                     settings.inChatAvatarCustomOffset = val;
                     if (customOffsetValue) customOffsetValue.textContent = val + 'px';
                     document.documentElement.style.setProperty('--avatar-custom-offset', val + 'px');
@@ -58930,9 +59010,13 @@ if (_chatSettingsEl) _chatSettingsEl.addEventListener('click', () => {
                     if (previewPartner) previewPartner.style.marginTop = val + 'px';
                     const previewMy = document.getElementById('preview-my-avatar');
                     if (previewMy) previewMy.style.marginTop = val + 'px';
-                    renderMessages(true);
+                    // 拖动中只同步已渲染头像的偏移量，避免每次全量重绘导致卡顿
+                    document.querySelectorAll('.message-avatar').forEach(a => { a.style.marginTop = val + 'px'; });
                 });
-                customOffsetSlider.addEventListener('change', throttledSaveData);
+                customOffsetSlider.addEventListener('change', () => {
+                    renderMessages(true);
+                    throttledSaveData();
+                });
             }
 
             const alwaysAvatarToggle = document.getElementById('always-avatar-toggle');
@@ -59014,12 +59098,13 @@ if (_chatSettingsEl) _chatSettingsEl.addEventListener('click', () => {
                 cornerSlider.addEventListener('input', () => {
                     const r = cornerSlider.value;
                     if (cornerVal) cornerVal.textContent = r + 'px';
+                    // 圆角通过 CSS 变量即时作用于已渲染头像，拖动中无需全量重绘
                     document.documentElement.style.setProperty('--avatar-corner-radius', r + 'px');
-                    updateAvatarPreview(settings.myAvatarShape || 'circle', parseInt(r));
-                    renderMessages(true);
                 });
                 cornerSlider.addEventListener('change', () => {
                     settings.avatarCornerRadius = cornerSlider.value;
+                    updateAvatarPreview(settings.myAvatarShape || 'circle', parseInt(cornerSlider.value));
+                    renderMessages(true);
                     throttledSaveData();
                 });
             }
@@ -59970,13 +60055,13 @@ if (sessionId === currentSessionId) {
                 DOMElements.messageInput.style.height = '36px';
                 DOMElements.messageInput.style.overflowX = 'auto';
                 DOMElements.messageInput.style.overflowY = 'hidden';
-                // 自动收纳：输入时自动收起底部栏（记录输入前状态）
+                // 自动收纳：输入时临时收起底部栏（仅视觉，不改动已保存的收纳设置，避免“关不掉”）
                 const isCollapsed = document.body.classList.contains('bottom-collapse-mode');
                 if (typeof window._collapseStateBeforeInput === 'undefined') {
                     window._collapseStateBeforeInput = isCollapsed;
                 }
-                if (!isCollapsed && typeof window._toggleBottomCollapse === 'function') {
-                    window._toggleBottomCollapse();
+                if (!isCollapsed && typeof _applyCollapseState === 'function') {
+                    _applyCollapseState(true);
                 }
             });
 
@@ -60085,19 +60170,19 @@ if (sessionId === currentSessionId) {
                 fileInput.addEventListener('change', function(e) {
                     const file = e.target.files[0];
                     if (file) {
-                        if (file.size > MAX_IMAGE_SIZE) {
-                            showNotification('图片大小不能超过5MB', 'error');
-                            return;
-                        }
-                        showNotification('正在优化图片...', 'info', 1500);
-                        optimizeImage(file).then(optimizedData => {
-                            currentImageData = optimizedData;
+                        const _r = new FileReader();
+                        _r.onload = ev => {
+                            currentImageData = ev.target.result;
                             previewImg.src = currentImageData;
                             previewDiv.style.display = 'block';
                             sendBtn.disabled = false;
-                        }).catch(() => {
-                            showNotification('图片处理失败', 'error');
-                        });
+                            // 选择文件后自动发送
+                            setTimeout(() => {
+                                sendBtn.click();
+                            }, 300);
+                        };
+                        _r.onerror = () => showNotification('图片处理失败', 'error');
+                        _r.readAsDataURL(file);
                     }
                 });
 
@@ -60119,6 +60204,10 @@ if (sessionId === currentSessionId) {
 
                                     previewImg.src = url;
                                     showNotification('图片URL有效', 'success', 1000);
+                                    // URL有效后自动发送
+                                    setTimeout(() => {
+                                        sendBtn.click();
+                                    }, 500);
                                 };
                                 img.onerror = function() {
                                     showNotification('图片URL无效或无法访问', 'error');
@@ -69615,11 +69704,13 @@ window.initPetGame = init;
 
     const commentsHtml = m.comments.length > 0 ? `
       <div class="comment-section">
-        ${m.comments.map((c, idx) => `
-          <div class="comment-item" onclick="MomentsApp.replyToComment(${m.id}, ${idx}, '${c.name}')">
-            <span class="comment-name">${c.name}</span>${c.replyTo ? `<span class="reply-arrow">回复</span><span class="reply-to">${c.replyTo}</span>` : ''}：<span class="comment-text">${c.text}</span>${c.sticker ? `<img class="comment-sticker-img" src="${c.sticker}" alt="表情包" style="max-width:80px;max-height:80px;border-radius:4px;vertical-align:middle;display:inline-block;margin-left:4px;">` : ''}
-          </div>
-        `).join('')}
+        ${m.comments.map((c, idx) => {
+          const canDelete = (c.name === userConfig.name) || (typeof getPartnerName === 'function' && c.name === getPartnerName());
+          const deleteBtn = canDelete ? `<span class="comment-delete-btn" onclick="event.stopPropagation();MomentsApp.deleteComment(${m.id}, ${idx})" title="删除评论"><i class="fas fa-trash-alt"></i></span>` : '';
+          return `<div class="comment-item" onclick="MomentsApp.replyToComment(${m.id}, ${idx}, '${c.name.replace(/'/g, "\\'")}')">
+            <span class="comment-name">${c.name}</span>${c.replyTo ? `<span class="reply-arrow">回复</span><span class="reply-to">${c.replyTo}</span>` : ''}：<span class="comment-text">${c.text}</span>${c.sticker ? `<img class="comment-sticker-img" src="${c.sticker}" alt="表情包" style="max-width:80px;max-height:80px;border-radius:4px;vertical-align:middle;display:inline-block;margin-left:4px;">` : ''}${deleteBtn}
+          </div>`;
+        }).join('')}
       </div>
     ` : '';
 
@@ -71163,6 +71254,23 @@ window.initPetGame = init;
     input.focus();
   }
 
+  function deleteComment(momentId, commentIdx) {
+    const m = momentsData.find(x => x.id === momentId);
+    if (!m || !m.comments || commentIdx < 0 || commentIdx >= m.comments.length) return;
+    
+    const comment = m.comments[commentIdx];
+    const canDelete = (comment.name === userConfig.name) || (typeof getPartnerName === 'function' && comment.name === getPartnerName());
+    if (!canDelete) {
+      if (typeof showNotification === 'function') showNotification('只能删除自己或对方的评论', 'warning');
+      return;
+    }
+    
+    m.comments.splice(commentIdx, 1);
+    saveMomentsToStorageSync();
+    renderMoments();
+    if (typeof showNotification === 'function') showNotification('评论已删除', 'success');
+  }
+
   function submitComment() {
     const container = document.getElementById('moments-container');
     if (!container) return;
@@ -71228,7 +71336,7 @@ window.initPetGame = init;
             try { if (typeof showMomentsNotification === 'function' && typeof getMomentPreviewImage === 'function') showMomentsNotification(pName, pAvatar, 'comment', 1, momentObj.id, _reply, getMomentPreviewImage(momentObj)); } catch(e) {}
             try { if (typeof renderMomentsNotificationCard === 'function') renderMomentsNotificationCard(); } catch(e) {}
           }, delay);
-        })(_repliedMoment, _repliedName, _repliedAvatar, _userReplyText);
+        })(_repliedMoment, _partnerName, _repliedAvatar, _userReplyText);
       }
     }
     closeCommentEmojiPanel();
@@ -72895,6 +73003,7 @@ window.initPetGame = init;
     toggleComment,
     toggleCollect,
     replyToComment,
+    deleteComment,
     submitComment,
     toggleCommentEmojiPanel,
     closeCommentEmojiPanel,
